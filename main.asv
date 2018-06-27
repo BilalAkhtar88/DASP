@@ -21,7 +21,7 @@ wN = 1;                                                                     %Win
 wT = 0.020;                                                                 %Window time in seconds
 wS = wT*fs;                                                                 %Window size = Number of Samples in Window
 win = hann(wS+1);                                                           %Generating window, that can be hanning or hamming, of size wS samples   
-numOfWins = ceil(length(noisySS)/wS)*2;                                     %Total number of windows 
+numOfWins = ceil(length(noisySS)/wS)*2                                      %Total number of windows 
 
 %Appending zeros at the end of Audio Signal to avoid dimesion mismatch for last window
 if(numel(noisySS) < ((numOfWins+1)/2)*wS)
@@ -45,8 +45,8 @@ title('Spectrogram of unprocessed Noisy Speech Signal')
 %% FFT
 
 outWFFT = fft(outWO);                                                      %FFT works on columns so take transpose of outWO
-% sizeoutWO = size(outWO)
-% sizeoutWFFT = size(outWFFT)
+sizeoutWO = size(outWO)
+sizeoutWFFT = size(outWFFT)
 
 %% Noise PSD Estimator
 
@@ -79,8 +79,8 @@ for k = 1:size(yPSD_expS,1)
     nPSD(k,size(yPSD_expS,2)-M+2:size(yPSD_expS,2)) = min(yPSD_expS(k,size(yPSD_expS,2)-M+2:size(yPSD_expS,2)));
 end
 
-% y_PSD_Size = size(yPSD_expS)
-% noise_PSD_Size = size(nPSD)
+y_PSD_Size = size(yPSD_expS)
+noise_PSD_Size = size(nPSD)
 
 %% Gain Function
 
@@ -88,15 +88,15 @@ end
 
 %% IFFT
 
-outWI = (ifft(outWFFT));                                                    %Using transpose to get frames in rows
+outWI = (ifft(outWFFT))';                                                   %Using transpose to get frames in rows
 
 %% Overlap and Add
 
 procSS = zeros(size(noisySS));                                              %Initializing the size of processed speech signal
-procSS(1:wS+1) = outWI(:,1);                                                %Getting back the first frame
+procSS(1:wS+1) = outWI(1,:)';                                                %Getting back the first frame
 
 for i = 1:numOfWins-1
-    procSS(i*wS/2:i*wS/2+wS) = outWI(:,i+1) + procSS(i*wS/2:i*wS/2+wS);     %Overlapping and Adding the received frames to recover the processed speech in procSS
+    procSS(i*wS/2:i*wS/2+wS) = outWI(i+1,:)' + procSS(i*wS/2:i*wS/2+wS);     %Overlapping and Adding the received frames to recover the processed speech in procSS
 end
 
 figure()
