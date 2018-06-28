@@ -10,11 +10,13 @@ close all;
 cs2 = audioread('clean_speech_2.wav');
 aNoise = audioread('aritificial_nonstat_noise.wav');
 bNoise = audioread('babble_noise.wav');
+cNoise = audioread('Speech_shaped_noise.wav');
 
-% noisySS = cs1 + bNoise(1:length(cs1));
-noisySS = cs1 + aNoise;
-noisySS = noisySS(1:500000); %Using shorter version of noisy signal
-
+% noisySS = cs1 + cNoise(1:length(cs1));
+% noisySS = cs1 + 10*aNoise;
+% noisySS = noisySS(1:800000); %Using shorter version of noisy signal
+% soundsc(noisySS, fs)
+audiowrite('noisySS.wav',noisySS,fs)
 %% Framing using 50% Overlapping Window
 
 wN = 1;                                                                     %Window Number, starting from 1
@@ -43,7 +45,7 @@ end
 % title('Spectrogram of unprocessed Noisy Speech Signal')
 
 %% FFT
-
+size(outWO)
 outWFFT = fft(outWO);                                                      %FFT works on columns so take transpose of outWO
 % sizeoutWO = size(outWO)
 % sizeoutWFFT = size(outWFFT)
@@ -73,11 +75,6 @@ M = (sWTime / wT);                                                          %Sli
 %we chose as mentioned in slides between 1-2 seconds
 
 nPSD(:,1:M-1) = yPSD_expS(:,1:M-1);
-% for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
-%     for l = 1:M                                                             %For time frames in window M
-%         nPSD(k,l) = (yPSD_expS(k,l));                                       %Noise PSD estimation using min of PSD of Yk(l)                
-%     end    
-% end
 
 for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
     for l = M:size(yPSD_expS,2)                                             %For time frames in window M
@@ -97,102 +94,114 @@ plot(10.*log(abs(nPSD(25,:))),'k','LineWidth',2);
 hold on;
 
 
-%-------------------------------------------------------------------------- 
-%Calculating the bias compensation
-%--------------------------------------------------------------------------
-
-%Optimizing alpha for each frame and frequency bin
-
-yPSD_expS(:,1) = (1-alpha).*yPSD(:,1);
-yPSD_expS2(:,1) = (1-0.96^2)*yPSD_expS(:,1);
-yPSD_expSq(:,1) = yPSD_expS(:,1).^2;
-
-% yPSD_expS2(:,1) = (0.96).*yPSD(:,1);
-% yPSD_expSq(:,1) = (0.96).*yPSDSq(:,1);
-alpha_max = 0.96;
-alpha_min = 0.3;
-alpha_Opt = zeros();
-alpha_Corr(1) = 1;
-alpha_CorrRes(1) = 1;
-
-for l = 2:size(yPSD,2)                                                      %For all the frames
-    average_STPSD_PrevFr = sum(yPSD_expS2(:,l-1));
-    average_Periodogram = sum(yPSD(:,l));
-    alpha_Corr(l) = 1 / (1 + (average_STPSD_PrevFr / average_Periodogram).^2);
-    alpha_CorrRes(l) = 0.7*alpha_CorrRes(l-1)+ 0.3*(max(alpha_Corr(l),0.7));
-    for k = 1:size(yPSD,1)                                                  %For all the frequency bins
-        alpha_Opt(k,l) = (alpha_max*alpha_CorrRes(l))/(1+(yPSD(k,l-1)/nPSD(k,l-1)-1).^2);                  %Recalculating smoothing factor using the formula (7) given in paper
-        alpha_Opt(k,l) = max(alpha_Opt(k,l),alpha_min);
-        beta = min((alpha_Opt(k,l).^2),0.8);
-        yPSD_expS(k,l) = alpha_Opt(k,l).*yPSD_expS(k,l-1) + (1-alpha_Opt(k,l)).*yPSD(k,l);
-        yPSD_expS2(k,l) = beta.*yPSD_expS2(k,l-1) + (1-beta).*yPSD_expS(k,l);
-        yPSD_expSq(k,l) = beta.*yPSD_expSq(k,l-1) + (1-beta).*(yPSD_expS2(k,l).^2);
-    end    
-end
-
-%Bias Correction Bmin
-
-for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
-    for l = M:size(yPSD_expS,2)                                             %For time frames in window M
-        nPSD(k,l) = min(yPSD_expS(k,l-M+1:l));                              %Noise PSD estimation using min of PSD of Yk(l)                
-    end    
-end
-
-
-var_NS = yPSD_expSq - yPSD_expS2.^2;
-Qeq(:,1) = 0.5;
-QeqE(:,1) = 0.5;
-nNewPSD(:,1) = nPSD(:,1);
-% (2.*(nPSD.^2))./var_NS;
-
-D = M; %For us D = 75 that is close to 80 so using the table given in paper we find MD and HD
-MD = 0.865;
-HD = 3.25;
-
-for l = 2:size(yPSD,2)                                                      %For all the frames
-    for k = 1:size(yPSD,1)                                                  %For all the frequency bins
-%         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
-        Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / abs(var_NS(k,l));        
-        QeqE(k,l) = (Qeq(k,l) - 2*MD) / (1 - MD);
-%         Qeq(k,l)
-%     (((1 + 2./Qeq(k,l))))
-        Bmin(k,l) = 1 + (D-1)*2/(QeqE(k,l));%.*(gamma(((1 + 2./Qeq(k,l))).^HD));
-%         nNewPSD(k,l) = Bmin(k,l)*nPSD(k,l);
-        nNewPSD(k,l) = nPSD(k,l);
-    end
-end
-
-%--------------------------------------------------------------------------
-plot(10.*log(abs(yPSD_expS(25,:))),'g');
-hold on;
-plot(10.*log(abs(nNewPSD(25,:))),'r');
-hold on;
-nNewPSD = nNewPSD.*Bmin;
-plot(10.*log(abs(nNewPSD(25,:))),'r');
-hold on;
-plot(alpha_Opt(25,:),'b');
-hold on;
+% %-------------------------------------------------------------------------- 
+% %Calculating the bias compensation
+% %--------------------------------------------------------------------------
+% 
+% %Optimizing alpha for each frame and frequency bin
+% 
+% yPSD_expS(:,1) = (1-alpha).*yPSD(:,1);
+% yPSD_expS2(:,1) = (1-0.96^2)*yPSD_expS(:,1);
+% yPSD_expSq(:,1) = yPSD_expS(:,1).^2;
+% 
+% % yPSD_expS2(:,1) = (0.96).*yPSD(:,1);
+% % yPSD_expSq(:,1) = (0.96).*yPSDSq(:,1);
+% alpha_max = 0.96;
+% alpha_min = 0.3;
+% alpha_Opt = zeros();
+% alpha_Corr(1) = 1;
+% alpha_CorrRes(1) = 1;
+% 
+% for l = 2:size(yPSD,2)                                                      %For all the frames
+%     average_STPSD_PrevFr = sum(yPSD_expS2(:,l-1));
+%     average_Periodogram = sum(yPSD(:,l));
+%     alpha_Corr(l) = 1 / (1 + (average_STPSD_PrevFr / average_Periodogram).^2);
+%     alpha_CorrRes(l) = 0.7*alpha_CorrRes(l-1)+ 0.3*(max(alpha_Corr(l),0.7));
+%     for k = 1:size(yPSD,1)                                                  %For all the frequency bins
+%         alpha_Opt(k,l) = (alpha_max*alpha_CorrRes(l))/(1+(yPSD(k,l-1)/nPSD(k,l-1)-1).^2);                  %Recalculating smoothing factor using the formula (7) given in paper
+%         alpha_Opt(k,l) = max(alpha_Opt(k,l),alpha_min);
+%         beta = min((alpha_Opt(k,l).^2),0.8);
+%         yPSD_expS(k,l) = alpha_Opt(k,l).*yPSD_expS(k,l-1) + (1-alpha_Opt(k,l)).*yPSD(k,l);
+%         yPSD_expS2(k,l) = beta.*yPSD_expS2(k,l-1) + (1-beta).*yPSD_expS(k,l);
+%         yPSD_expSq(k,l) = beta.*yPSD_expSq(k,l-1) + (1-beta).*(yPSD_expS2(k,l).^2);
+%     end    
+% end
+% 
+% %Bias Correction Bmin
+% 
+% for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
+%     for l = M:size(yPSD_expS,2)                                             %For time frames in window M
+%         nPSD(k,l) = min(yPSD_expS(k,l-M+1:l));                              %Noise PSD estimation using min of PSD of Yk(l)                
+%     end    
+% end
+% 
+% 
+% var_NS = yPSD_expSq - yPSD_expS2.^2;
+% Qeq(:,1) = 0.5;
+% QeqE(:,1) = 0.5;
+% nNewPSD(:,1) = nPSD(:,1);
+% % (2.*(nPSD.^2))./var_NS;
+% 
+% D = M; %For us D = 75 that is close to 80 so using the table given in paper we find MD and HD
+% MD = 0.865;
+% HD = 3.25;
+% 
+% for l = 2:size(yPSD,2)                                                      %For all the frames
+%     for k = 1:size(yPSD,1)                                                  %For all the frequency bins
+% %         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
+%         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / abs(var_NS(k,l));        
+%         QeqE(k,l) = (Qeq(k,l) - 2*MD) / (1 - MD);
+% %         Qeq(k,l)
+% %     (((1 + 2./Qeq(k,l))))
+%         Bmin(k,l) = 1 + (D-1)*2/(QeqE(k,l));%.*(gamma(((1 + 2./Qeq(k,l))).^HD));
+% %         nNewPSD(k,l) = Bmin(k,l)*nPSD(k,l);
+%         nNewPSD(k,l) = nPSD(k,l);
+%     end
+% end
+% 
+% %--------------------------------------------------------------------------
+% plot(10.*log(abs(yPSD_expS(25,:))),'g');
+% hold on;
+% plot(10.*log(abs(nNewPSD(25,:))),'r');
+% hold on;
+% nNewPSD = nNewPSD.*Bmin;
+% plot(10.*log(abs(nNewPSD(25,:))),'r');
+% hold on;
     
-title('Power Spectral Density, frequency bin = 25')
-xlabel('frames')
-ylabel('dB')
-legend('periodogram (k = 25)','smoothed periodogram (k = 25)','noise estimate without bias compensation (k = 25)','noise estimate with bias compensation (k = 25)')
+% title('Power Spectral Density, frequency bin = 25')
+% xlabel('frames')
+% ylabel('dB')
+% legend('periodogram (k = 25)','smoothed periodogram (k = 25)','noise estimate without bias compensation (k = 25)','noise estimate with bias compensation (k = 25)')
 
 % figure()
 % plot(nNewPSD(25,:))
+nNewPSD = nPSD;
 
+% plot(alpha_Opt(25,:),'b');
+% hold on;
 %% Gain Function
+%--------------------------------------------------------------------------
+%Speech PSD Estimation using Wiener Filter 
+%--------------------------------------------------------------------------
 
-% -------------------------- Wiener Filter -------------- %
-b = 1.5;        %Amount of subraction
-filt_Response = max((yPSD - b.*nNewPSD)./yPSD,0);
-PSD_Speech = (H.*framesFreqSquared);
+subTr = 1.5;        %Amount of subraction
+
+for r = 1:size(yPSD,1)
+    for c = 1:size(yPSD,2)
+        filt_Response(r,c) = max(1 - nNewPSD(r,c)/yPSD(r,c),0);
+        PSD_Speech(r,c) = (filt_Response(r,c).*abs(yPSD(r,c)));
+        speech_est_Wiener(r,c) = (abs(filt_Response(r,c))*abs(outWFFT(r,c)))*exp(complex(0,angle(outWFFT(r,c))));
+    end
+end
+
+
+
 
 
 %% IFFT
 
-outWI = (ifft(outWFFT));                                                    %Using transpose to get frames in rows
-
+outWI = real(ifft(speech_est_Wiener));                                                    %Using transpose to get frames in rows
+% size(outWI)
 %% Overlap and Add
 
 procSS = zeros(size(noisySS));                                              %Initializing the size of processed speech signal
@@ -202,14 +211,17 @@ for i = 1:numOfWins-1
     procSS(i*wS/2:i*wS/2+wS) = outWI(:,i+1) + procSS(i*wS/2:i*wS/2+wS);     %Overlapping and Adding the received frames to recover the processed speech in procSS
 end
 
-% figure()
-% spectrogram(procSS,win,'yaxis')
-% title('Spectrogram of Enhanced Speech Signal')
+figure()
+spectrogram(procSS,win,'yaxis')
+title('Spectrogram of Enhanced Speech Signal')
 
-% figure()
-% subplot(2,1,1)
-% plot(noisySS)
-% subplot(2,1,2)
-% plot(procSS)
+figure()
+subplot(2,1,1)
+plot(noisySS)
+subplot(2,1,2)
+plot(procSS)
+ylim([-0.6 0.6])
+
+audiowrite('procSS.wav',procSS,fs)
 
 end
