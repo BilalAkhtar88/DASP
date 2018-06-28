@@ -88,6 +88,13 @@ end
 % y_PSD_Size = size(yPSD_expS)
 % noise_PSD_Size = size(nPSD)
 
+figure();
+plot(10.*log(abs(yPSD(25,:))),':k');
+hold on;
+plot(10.*log(abs(yPSD_expS(25,:))),'k');
+hold on;
+plot(10.*log(abs(nPSD(25,:))),'k','LineWidth',2);
+hold on;
 
 
 %-------------------------------------------------------------------------- 
@@ -95,10 +102,13 @@ end
 %--------------------------------------------------------------------------
 
 %Optimizing alpha for each frame and frequency bin
-yPSDSq = yPSD_expS.^2;
 
-yPSD_expS2(:,1) = (0.96).*yPSD(:,1);
-yPSD_expSq(:,1) = (0.96).*yPSDSq(:,1);
+yPSD_expS(:,1) = (1-alpha).*yPSD(:,1);
+yPSD_expS2(:,1) = (1-0.96^2)*yPSD_expS(:,1);
+yPSD_expSq(:,1) = yPSD_expS(:,1).^2;
+
+% yPSD_expS2(:,1) = (0.96).*yPSD(:,1);
+% yPSD_expSq(:,1) = (0.96).*yPSDSq(:,1);
 alpha_max = 0.96;
 alpha_min = 0.3;
 alpha_Opt = zeros();
@@ -113,16 +123,25 @@ for l = 2:size(yPSD,2)                                                      %For
     for k = 1:size(yPSD,1)                                                  %For all the frequency bins
         alpha_Opt(k,l) = (alpha_max*alpha_CorrRes(l))/(1+(yPSD(k,l-1)/nPSD(k,l-1)-1).^2);                  %Recalculating smoothing factor using the formula (7) given in paper
         alpha_Opt(k,l) = max(alpha_Opt(k,l),alpha_min);
-        beta = min((alpha_Opt(k,l)).^2,0.8);
+        beta = min((alpha_Opt(k,l).^2),0.8);
+        yPSD_expS(k,l) = alpha_Opt(k,l).*yPSD_expS(k,l-1) + (1-alpha_Opt(k,l)).*yPSD(k,l);
         yPSD_expS2(k,l) = beta.*yPSD_expS2(k,l-1) + (1-beta).*yPSD_expS(k,l);
-        yPSD_expSq(k,l) = beta.*yPSD_expSq(k,l-1) + (1-beta).*yPSDSq(k,l);
+        yPSD_expSq(k,l) = beta.*yPSD_expSq(k,l-1) + (1-beta).*(yPSD_expS2(k,l).^2);
     end    
 end
 
 %Bias Correction Bmin
 
+for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
+    for l = M:size(yPSD_expS,2)                                             %For time frames in window M
+        nPSD(k,l) = min(yPSD_expS(k,l-M+1:l));                              %Noise PSD estimation using min of PSD of Yk(l)                
+    end    
+end
+
+
 var_NS = yPSD_expSq - yPSD_expS2.^2;
 Qeq(:,1) = 0.5;
+QeqE(:,1) = 0.5;
 nNewPSD(:,1) = nPSD(:,1);
 % (2.*(nPSD.^2))./var_NS;
 
@@ -132,33 +151,48 @@ HD = 3.25;
 
 for l = 2:size(yPSD,2)                                                      %For all the frames
     for k = 1:size(yPSD,1)                                                  %For all the frequency bins
-        Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
+%         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
+        Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / abs(var_NS(k,l));        
         QeqE(k,l) = (Qeq(k,l) - 2*MD) / (1 - MD);
-        Bmin(k,l) = 1 + (D-1)*2/(QeqE(k,l)); %*(gamma((1 + 2./Qeq(k,l)).^HD));
-        nNewPSD(k,l) = Bmin(k,l)*nPSD(k,l);
+%         Qeq(k,l)
+%     (((1 + 2./Qeq(k,l))))
+        Bmin(k,l) = 1 + (D-1)*2/(QeqE(k,l));%.*(gamma(((1 + 2./Qeq(k,l))).^HD));
+%         nNewPSD(k,l) = Bmin(k,l)*nPSD(k,l);
+        nNewPSD(k,l) = nPSD(k,l);
     end
 end
 
 %--------------------------------------------------------------------------
-
-figure();
-plot(10.*log(abs(yPSD(25,:))),':k');
+plot(10.*log(abs(yPSD_expS(25,:))),'g');
 hold on;
-plot(10.*log(abs(yPSD_expS(25,:))),'k');
-hold on;
-plot(10.*log(abs(nPSD(25,:))),'k','LineWidth',2);
-hold on;
+% plot(10.*log(abs(nNewPSD(25,:))),'r');
+% hold on;
+nNewPSD = nNewPSD.*Bmin;
 plot(10.*log(abs(nNewPSD(25,:))),'r');
-hold off;
-title('Power Spectral Density, frequency bin = 25')
-xlabel('frames')
-ylabel('dB')
-legend('periodogram (k = 25)','smoothed periodogram (k = 25)','noise estimate without bias compensation (k = 25)','noise estimate with bias compensation (k = 25)')
+hold on;
+    
+% title('Power Spectral Density, frequency bin = 25')
+% xlabel('frames')
+% ylabel('dB')
+% legend('periodogram (k = 25)','smoothed periodogram (k = 25)','noise estimate without bias compensation (k = 25)','noise estimate with bias compensation (k = 25)')
 
 % figure()
 % plot(nNewPSD(25,:))
 
+%--------------------------------------------------------------------------
+%Speech PSD Estimation using Wiener Filter 
+%--------------------------------------------------------------------------
+
+subTr = 1.5;        %Amount of subraction
+filt_Response = max((yPSD - subTr.*nNewPSD)./yPSD,0);
+PSD_Speech = (filt_Response.*yPSD);
+% plot(10.*log(abs(PSD_Speech(25,:))),'b');
+% hold on;
+
+% plot(alpha_Opt(25,:),'b');
+% hold on;
 %% Gain Function
+
 
 
 
