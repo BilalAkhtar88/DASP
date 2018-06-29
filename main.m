@@ -13,20 +13,21 @@ aNoise = audioread('aritificial_nonstat_noise.wav');
 bNoise = audioread('babble_noise.wav');
 cNoise = audioread('Speech_shaped_noise.wav');
 
-noise = cNoise(1:length(cs1));
-
-% noisySS = cs1 + cNoise(1:length(cs1));
+% noise = cNoise(1:length(cs1));
+speech = cs1;
+noise = aNoise;
+% noisySS = speech + cNoise(1:length(speech));
 % noisySS = noisySS(1:800000); %Using shorter version of noisy signal
 % soundsc(noisySS, fs)
 
 %Power of signal
-sig_Pow = sum((abs(cs1).^2)./length(cs1));
+sig_Pow = sum((abs(speech).^2)./length(speech));
 noi_Pow = sum((abs(noise).^2)./length(noise));
 
-snrOrig = 10*log10(sig_Pow./noi_Pow) %original SNR
+snrOrig = 10*log10(sig_Pow./noi_Pow); %original SNR
 noi_Des = sig_Pow./(10^(SNR/10));
 noiSNR = sqrt(noi_Des/noi_Pow).*noise;
-noisySS = cs1 + noiSNR;
+noisySS = speech + noiSNR;
 
 audiowrite('noisySS.wav',noisySS,fs)
 %% Framing using 50% Overlapping Window
@@ -57,7 +58,7 @@ end
 % title('Spectrogram of unprocessed Noisy Speech Signal')
 
 %% FFT
-size(outWO)
+size(outWO);
 outWFFT = fft(outWO);                                                      %FFT works on columns so take transpose of outWO
 % sizeoutWO = size(outWO)
 % sizeoutWFFT = size(outWFFT)
@@ -70,7 +71,7 @@ yPSD = (abs(outWFFT).^2);                                                   %Cal
 %Reducing Variance in signal Yk(l) using Exponential Smoother
 %--------------------------------------------------------------------------
 tSm = 0.2;                                                                  %Smoothing window time = 0.2 seconds as given in paper
-alpha = ((tSm*fs / (wS/2)) - 1) / ((tSm*fs / (wS/2)) + 1)                   %Alpha determines the smoothing factor calculated using formula from the paper in ref [38] of the book
+alpha = ((tSm*fs / (wS/2)) - 1) / ((tSm*fs / (wS/2)) + 1);                   %Alpha determines the smoothing factor calculated using formula from the paper in ref [38] of the book
 yPSD_expS(:,1) = (1-alpha).*yPSD(:,1);                                      %Reducing Variance
 
 for i = 2:size(yPSD,2)
@@ -229,7 +230,7 @@ sEMMSE = (HMMSE.*abs(outWFFT)).*exp(complex(0,angle(outWFFT)));
 
 %% IFFT
 
-outWI = real(ifft(sEMMSE));                                                    
+% outWI = real(ifft(sEMMSE));                                                    
 % outWI = real(ifft(sEstSS));                                                    
 % outWI = real(ifft(speech_est_Wiener));                                         
 % size(outWI)
@@ -241,6 +242,16 @@ procSS(1:wS+1) = outWI(:,1);                                                %Get
 for i = 1:numOfWins-1
     procSS(i*wS/2:i*wS/2+wS) = outWI(:,i+1) + procSS(i*wS/2:i*wS/2+wS);     %Overlapping and Adding the received frames to recover the processed speech in procSS
 end
+
+error = sum((speech - procSS(1:length(speech))).^2);
+fprintf('Sum of squared errors: %.4f\n', error);
+
+orig = stoi(speech, noisySS(1:length(speech)), fs);
+fprintf('STOI score unprocessed: %.4f\n', orig);
+
+intelligibility = stoi(speech, procSS(1:length(speech)), fs);
+fprintf('STOI score   processed: %.4f\n', intelligibility);
+
 
 % figure()
 % spectrogram(procSS,win,'yaxis')

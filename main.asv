@@ -13,8 +13,8 @@ aNoise = audioread('aritificial_nonstat_noise.wav');
 bNoise = audioread('babble_noise.wav');
 cNoise = audioread('Speech_shaped_noise.wav');
 
-noise = cNoise(1:length(cs1));
-
+% noise = cNoise(1:length(cs1));
+noise = aNoise;
 % noisySS = cs1 + cNoise(1:length(cs1));
 % noisySS = noisySS(1:800000); %Using shorter version of noisy signal
 % soundsc(noisySS, fs)
@@ -23,7 +23,7 @@ noise = cNoise(1:length(cs1));
 sig_Pow = sum((abs(cs1).^2)./length(cs1));
 noi_Pow = sum((abs(noise).^2)./length(noise));
 
-snrOrig = 10*log10(sig_Pow./noi_Pow) %original SNR
+snrOrig = 10*log10(sig_Pow./noi_Pow); %original SNR
 noi_Des = sig_Pow./(10^(SNR/10));
 noiSNR = sqrt(noi_Des/noi_Pow).*noise;
 noisySS = cs1 + noiSNR;
@@ -70,7 +70,7 @@ yPSD = (abs(outWFFT).^2);                                                   %Cal
 %Reducing Variance in signal Yk(l) using Exponential Smoother
 %--------------------------------------------------------------------------
 tSm = 0.2;                                                                  %Smoothing window time = 0.2 seconds as given in paper
-alpha = ((tSm*fs / (wS/2)) - 1) / ((tSm*fs / (wS/2)) + 1)                   %Alpha determines the smoothing factor calculated using formula from the paper in ref [38] of the book
+alpha = ((tSm*fs / (wS/2)) - 1) / ((tSm*fs / (wS/2)) + 1);                   %Alpha determines the smoothing factor calculated using formula from the paper in ref [38] of the book
 yPSD_expS(:,1) = (1-alpha).*yPSD(:,1);                                      %Reducing Variance
 
 for i = 2:size(yPSD,2)
@@ -181,9 +181,9 @@ hold on;
 % hold on;
 
 % nNewPSD = nPSD;
-% nNewPSD = Bmin.*nPSD;
+% nNewPSD = max(Bmin,2).*nPSD;
 % nNewPSD = newPSD;
-nNewPSD = max(Bmin,2).*newPSD;
+% nNewPSD = max(Bmin,2).*newPSD;
 plot(10.*log(abs(nNewPSD(25,:))),'r');
 hold on;    
 
@@ -218,19 +218,21 @@ sEstSS = ((max((1 - (b.*abs(nNewPSD).^a)./((abs(outWFFT)).^a)),0)).^(1/a)).*outW
 %MMSE 
 %--------------------------------------------------------------------------
 
-kappa = yPSD./nNewPSD;
+kappa(:,1) = yPSD(:,1)./nNewPSD(:,1);
 sigmaSNR(:,1) = kappa(:,1);
 for i = 2:size(yPSD,2)
+    kappa(:,i) = yPSD(:,i-1)./nNewPSD(:,i);
     sigmaSNR(:,i) = (yPSD(:,i)./nNewPSD(:,i-1)) - 1;                        %Slide 18 Lecture 4, Using Maximum Likelihood Estimator
 end
 u = (sigmaSNR./(sigmaSNR + 1)).*kappa;
 HMMSE = ((sqrt(pi*u))./(2*kappa)).*(exp(-u/2)).*((1+u).*besseli(0,u./2) + u.*besseli(1,u./2));
-sEMMSE = (HMMSE.*abs(out)).*exp(complex(0,angle(framesFreq)));
+sEMMSE = (HMMSE.*abs(outWFFT)).*exp(complex(0,angle(outWFFT)));
 
 %% IFFT
 
-% outWI = real(ifft(sEstSS));                                                    %Using transpose to get frames in rows
-outWI = real(ifft(speech_est_Wiener));                                                    %Using transpose to get frames in rows
+outWI = real(ifft(sEMMSE));                                                    
+% outWI = real(ifft(sEstSS));                                                    
+% outWI = real(ifft(speech_est_Wiener));                                         
 % size(outWI)
 %% Overlap and Add
 
