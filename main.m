@@ -6,14 +6,14 @@ clear all;
 
 %% Single Microphone System --- Generating Noisy Speech Signals
 
-SNR = 10;
+SNR = 0;
 [cs1, fs] = audioread('clean_speech.wav');
 cs2 = audioread('clean_speech_2.wav');
 aNoise = audioread('aritificial_nonstat_noise.wav');
 bNoise = audioread('babble_noise.wav');
 cNoise = audioread('Speech_shaped_noise.wav');
 
-noise = aNoise;
+noise = cNoise(1:length(cs1));
 
 % noisySS = cs1 + cNoise(1:length(cs1));
 % noisySS = noisySS(1:800000); %Using shorter version of noisy signal
@@ -80,8 +80,8 @@ end
 %-------------------------------------------------------------------------- 
 %Noise PSD Estimation using Minimum Statistics
 %--------------------------------------------------------------------------
-sWTime = 1.00;                                                              %Sliding window time should be in between 1-2 seconds (page 31 of Book)
-M = (sWTime / wT);                                                          %Sliding Window Size (Span of the sliding window calculated by dividing the sliding time by the time of each window)
+sWTime = 2.00;                                                              %Sliding window time should be in between 1-2 seconds (page 31 of Book)
+M = (sWTime / wT)                                                           %Sliding Window Size (Span of the sliding window calculated by dividing the sliding time by the time of each window)
 %In the paper the authors took M = 96 and tracing back the equations they
 %have wT = 0.032 seconds giving sWTime approximately equal to 3 seconds but
 %we chose as mentioned in slides between 1-2 seconds
@@ -139,11 +139,11 @@ end
 
 %Bias Correction Bmin
 
-nPSD(:,1:M-1) = yPSD_expS(:,1:M-1);
+newPSD(:,1:M-1) = yPSD_expS(:,1:M-1);
 
 for k = 1:size(yPSD_expS,1)                                                 %For all the frequency bins
     for l = M:size(yPSD_expS,2)                                             %For time frames in window M
-        nPSD(k,l) = min(yPSD_expS(k,l-M+1:l));                              %Noise PSD estimation using min of PSD of Yk(l)                
+        newPSD(k,l) = min(yPSD_expS(k,l-M+1:l));                              %Noise PSD estimation using min of PSD of Yk(l)                
     end    
 end
 
@@ -154,26 +154,24 @@ HD = 3.25;
 var_NS = yPSD_expSq - yPSD_expS2.^2;
 Qeq(:,1) = 2;
 QeqE(:,1) = 2;
-nNewPSD(:,1) = D.*nPSD(:,1);    %In paper it says Bmin = D for Qeq = 2
+nNewPSD(:,1) = D.*newPSD(:,1);    %In paper it says Bmin = D for Qeq = 2
  
 for l = 2:size(yPSD,2)                                                      %For all the frames
     for k = 1:size(yPSD,1)                                                  %For all the frequency bins
-        Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
-%         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / abs(var_NS(k,l));        
+%         Qeq(k,l) = (2*(nNewPSD(k,l-1)).^2) / (var_NS(k,l));
+        Qeq(k,l) = min((2*(nNewPSD(k,l-1)).^2) / abs(var_NS(k,l)),50);        
         QeqE(k,l) = (Qeq(k,l) - 2*MD) / (1 - MD);
-        Bmin(k,l) = 1 + ((D-1)*2/(QeqE(k,l)));%*((gamma(1 + 2/Qeq(k,l))).^HD);
-        nNewPSD(k,l) = nPSD(k,l);
-        nNewPSD(k,l) = Bmin(k,l)*nPSD(k,l);
+        Bmin(k,l) = 1 + ((D-1)*2/(QeqE(k,l)));%*(gamma((1 + 2/Qeq(k,l)).^HD));
+        nNewPSD(k,l) = newPSD(k,l);
     end
 end
-% 
+
+%
 % %--------------------------------------------------------------------------
 plot(10.*log(abs(yPSD_expS(25,:))),'g');
 hold on;
-plot(10.*log(abs(nPSD(25,:))),'r');
+plot(10.*log(abs(newPSD(25,:))),'b');
 hold on;
-plot(10.*log(abs(nNewPSD(25,:))),'r');
-hold on;    
 % title('Power Spectral Density, frequency bin = 25')
 % xlabel('frames')
 % ylabel('dB')
@@ -181,30 +179,59 @@ hold on;
 
 % plot(alpha_Opt(25,:),'b');
 % hold on;
+
+% nNewPSD = nPSD;
+% nNewPSD = max(Bmin,2).*nPSD;
+nNewPSD = newPSD;
+% nNewPSD = max(Bmin,2).*newPSD;
+plot(10.*log(abs(nNewPSD(25,:))),'r');
+hold on;    
+
+
+
 %% Gain Function
 %--------------------------------------------------------------------------
 %Speech PSD Estimation using Wiener Filter 
 %--------------------------------------------------------------------------
 
+PSD_Speech = max(yPSD_expS - nNewPSD,0);
+        
+% nNewPSD = nPSD;
 for r = 1:size(yPSD,1)
     for c = 1:size(yPSD,2)
-        filt_Response(r,c) = max((1 - abs(nNewPSD(r,c)) / yPSD(r,c)),0);
-        PSD_Speech(r,c) = (filt_Response(r,c).*abs(yPSD(r,c)));
-        speech_est_Wiener(r,c) = ((filt_Response(r,c))*abs(outWFFT(r,c)))*exp(complex(0,angle(outWFFT(r,c))));
+%         filt_Res(r,c) = max((1 - abs(nNewPSD(r,c)) / yPSD(r,c)),0);
+        filt_Res(r,c) = PSD_Speech(r,c) / (yPSD_expS(r,c));
+        speech_est_Wiener(r,c) = filt_Res(r,c)*outWFFT(r,c);
     end
 end
 
+%--------------------------------------------------------------------------
+%Simple Spectral Subtraction
+%--------------------------------------------------------------------------
 
+a = 2;
+b = 3;
 
-%Spectral Subtraction
+sEstSS = ((max((1 - (b.*abs(nNewPSD).^a)./((abs(outWFFT)).^a)),0)).^(1/a)).*outWFFT;
 
-sEstSS = (max((outWFFT-abs((nNewPSD))),0)).*exp(complex(0,angle(outWFFT)));
+%--------------------------------------------------------------------------
+%MMSE 
+%--------------------------------------------------------------------------
 
+kappa = yPSD./nNewPSD;
+sigmaSNR(:,1) = kappa(:,1);
+for i = 2:size(yPSD,2)
+    sigmaSNR(:,i) = (yPSD(:,i)./nNewPSD(:,i-1)) - 1;                        %Slide 18 Lecture 4, Using Maximum Likelihood Estimator
+end
+u = (sigmaSNR./(sigmaSNR + 1)).*kappa;
+HMMSE = ((sqrt(pi*u))./(2*kappa)).*(exp(-u/2)).*((1+u).*besseli(0,u./2) + u.*besseli(1,u./2));
+sEMMSE = (HMMSE.*abs(outWFFT)).*exp(complex(0,angle(outWFFT)));
 
 %% IFFT
 
-% outWI = real(ifft(sEstSS));                                                    %Using transpose to get frames in rows
-outWI = real(ifft(speech_est_Wiener));                                                    %Using transpose to get frames in rows
+outWI = real(ifft(sEMMSE));                                                    
+% outWI = real(ifft(sEstSS));                                                    
+% outWI = real(ifft(speech_est_Wiener));                                         
 % size(outWI)
 %% Overlap and Add
 
